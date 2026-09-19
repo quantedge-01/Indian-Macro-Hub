@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+from contextlib import asynccontextmanager
 from datetime import date
 
 from fastapi import FastAPI, HTTPException, Query
@@ -9,15 +10,42 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from .config import settings
 from .store import store
 
-app = FastAPI(title="Indian Macro Hub API", version="0.1.0", description="A searchable India macroeconomic time-series catalog.")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    store.initialize(seed=settings.seed_demo_data)
+    yield
 
 
-@app.on_event("startup")
-def prepare_database():
-    store.initialize()
+app = FastAPI(
+    title="Indian Macro Hub API",
+    version="1.0.0",
+    description="A searchable India macroeconomic time-series catalog.",
+    lifespan=lifespan,
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(settings.cors_origins),
+    allow_methods=["GET"],
+    allow_headers=["Accept", "Content-Type"],
+)
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
+
+@app.get("/health/live", include_in_schema=False)
+def liveness():
+    return {"status": "ok"}
 
 
 def require_series(series_id: str):
@@ -30,13 +58,33 @@ def require_series(series_id: str):
 @app.get("/health")
 def health():
     catalog = store.list_series()
-    return {"status": "ok", "catalog_series": len(catalog), "data_mode": "demo_seed" if any(item["is_demo_data"] for item in catalog) else "live"}
+    return {
+        "status": "ok" if catalog else "degraded",
+        "environment": settings.environment,
+        "database": str(store.path),
+        "catalog_series": len(catalog),
+        "data_mode": "empty" if not catalog else ("demo_seed" if any(item["is_demo_data"] for item in catalog) else "live"),
+    }
+
+
+@app.get("/health/ready", include_in_schema=False)
+def readiness():
+    """Readiness probe: the service is ready only after the catalog is queryable."""
+    catalog = store.list_series()
+    if not catalog:
+        raise HTTPException(503, detail="Database is reachable but contains no series.")
+    return {"status": "ready", "catalog_series": len(catalog)}
 
 
 @app.get("/api/v1/series")
 def list_series(q: str | None = Query(None, min_length=1), category: str | None = None):
     matched = store.list_series(q, category)
     return {"count": len(matched), "data": matched}
+
+
+@app.get("/api/v1/meta")
+def metadata():
+    return {"name": "Indian Macro Hub", "version": app.version, "environment": settings.environment}
 
 
 @app.get("/api/v1/series/{series_id}")

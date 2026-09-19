@@ -9,17 +9,28 @@ from pathlib import Path
 from .catalog import OBSERVATIONS, SERIES
 
 DEFAULT_DB = Path(__file__).parent.parent / "data" / "indian_macro_hub.db"
+LEGACY_DB = Path(__file__).parent.parent / "data" / "arthadata.db"
 
 
 class Store:
     def __init__(self, database: str | Path | None = None):
-        self.path = Path(database or os.getenv("INDIAN_MACRO_HUB_DATABASE", DEFAULT_DB))
+        configured = database or os.getenv("INDIAN_MACRO_HUB_DATABASE")
+        if configured:
+            self.path = Path(configured).expanduser()
+        elif DEFAULT_DB.exists() or not LEGACY_DB.exists():
+            self.path = DEFAULT_DB
+        else:
+            # Preserve an existing pre-rename installation instead of silently
+            # creating a fresh demo database beside a user's live database.
+            self.path = LEGACY_DB
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def connection(self):
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA busy_timeout = 5000")
+        connection.execute("PRAGMA journal_mode = WAL")
         return connection
 
     def initialize(self, seed: bool = True) -> None:

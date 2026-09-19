@@ -2,3 +2,7 @@
 __pycache__/
 *.pyc
 data/*.db
+data/*.db-shm
+data/*.db-wal
+.env
+.pytest_cache/

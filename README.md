@@ -1,6 +1,20 @@
 # Indian Macro Hub
 
-An India-focused FRED-style macroeconomic time-series MVP: searchable catalog, provenance-rich series pages, charting, CSV download and an API. Data is persisted locally in SQLite, with an immutable observation-vintage model.
+Indian Macro Hub is a source-aware time-series catalog for India's macroeconomy. It provides searchable series metadata, historical observations, provenance, charting, CSV exports, and a small JSON API.
+
+The project is designed as a maintainable showcase and a foundation for production ingestion—not as a claim that every bundled value is production data. Demo seed data is clearly labelled; live connectors retain the provider URL, import date, and vintage of each observation.
+
+## Features
+
+- FastAPI backend with OpenAPI documentation at `/docs`
+- Responsive static web UI at `/app/`
+- SQLite storage with foreign keys, WAL mode, indexes, and immutable observation vintages
+- World Bank and FRED connectors using public provider APIs
+- Official CSV importer for approved RBI/MoSPI releases
+- Search, category filtering, date ranges, vintage selection, and CSV export
+- Liveness and readiness health probes for deployment
+- Environment-based configuration and a non-root Docker image
+- GitHub Actions checks for tests and Python compilation
 
 ## Run locally
 
@@ -8,47 +22,106 @@ An India-focused FRED-style macroeconomic time-series MVP: searchable catalog, p
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env       # optional; edit values for your environment
 uvicorn app.main:app --reload
 ```
 
-Open `http://127.0.0.1:8000/app/`. Interactive API documentation is at `/docs`.
+Open `http://127.0.0.1:8000/app/`. API documentation is available at `http://127.0.0.1:8000/docs`.
+
+The default development mode seeds a small, clearly-labelled demo catalog. Set `SEED_DEMO_DATA=false` for an empty/live-only database.
+
+## Docker
+
+```bash
+docker build -t indian-macro-hub .
+docker run --rm -p 8000:8000 \
+  -e SEED_DEMO_DATA=true \
+  -v "$PWD/data:/app/data" \
+  indian-macro-hub
+```
+
+For production, mount a persistent volume at `/app/data`, set `SEED_DEMO_DATA=false`, and configure `CORS_ORIGINS` only when the UI is hosted on a separate domain. SQLite is appropriate for a single-instance showcase; PostgreSQL is recommended for multi-instance or high-write deployments.
 
 ## API
 
-- `GET /api/v1/series?q=inflation`
-- `GET /api/v1/series/{series_id}`
-- `GET /api/v1/series/{series_id}/observations?start=2026-01-01`
-- `GET /api/v1/series/{series_id}/observations.csv`
+```text
+GET /health/live
+GET /health/ready
+GET /health
+GET /api/v1/meta
+GET /api/v1/series?q=inflation&category=Prices
+GET /api/v1/series/{series_id}
+GET /api/v1/series/{series_id}/observations?start=2020-01-01&end=2025-12-31
+GET /api/v1/series/{series_id}/observations?vintage=2026-09-19
+GET /api/v1/series/{series_id}/observations.csv
+```
 
-## Load real data (personal use)
+The default observations endpoint returns the latest available vintage for each observation date. A specific vintage can be requested when historical revision analysis is needed.
 
-The initial live connector imports real annual India indicators from the World Bank's public Indicators API. It removes the bundled demo series, writes observation vintages to SQLite, and can be safely rerun to add later source revisions:
+## Loading live data
+
+### World Bank annual indicators
 
 ```bash
 python3 -m app.world_bank
 ```
 
-The data remains attributed to its source on every series page. RBI/MoSPI connectors should be added separately using their approved download channels.
+This imports India's annual inflation, real GDP growth, total reserves, and domestic credit indicators from the World Bank Indicators API. It removes demo series and records the source URL and import date.
 
-## Import official high-frequency releases
-
-Download an official table, make a two-column CSV headed `date,value`, then import it with immutable vintage tracking. Example for MoSPI monthly CPI:
+### FRED feeds
 
 ```bash
-python3 -m app.official_csv cpi_combined.csv --id MOSPI-CPI-COMBINED --title "CPI Combined" --frequency Monthly --unit "Index" --source "MoSPI" --source-url "https://cpi.mospi.gov.in/" --category Prices
+python3 -m app.fred
 ```
 
-Use `Weekly` for RBI FX reserves and `Quarterly` for MoSPI GDP. Every import retains the source URL and import date; repeated imports add later vintages without overwriting previous ones.
+This imports the configured monthly CPI and quarterly real GDP feeds. Review provider terms before redistribution.
 
-## Important data boundary
+### Official CSV releases
 
-The included values are **demo seed data**, identified in every API response and UI. They are for exercising the product only. Before public release, replace `app/catalog.py` observations with verified source connectors and retain source URL, release date, definition, revision/vintage and licence for every observation.
+Prepare a CSV with `date,value` headers, then run:
 
-`app/ingestion.py` is the intentionally small contract for those connectors. It must only use source channels whose access and redistribution terms have been cleared.
+```bash
+python3 -m app.official_csv cpi_combined.csv \
+  --id MOSPI-CPI-COMBINED \
+  --title "CPI Combined" \
+  --frequency Monthly \
+  --unit "Index" \
+  --source "MoSPI" \
+  --source-url "https://cpi.mospi.gov.in/" \
+  --category Prices
+```
 
-## Suggested production sequence
+Each import is associated with a vintage date. Re-importing a revised value later preserves the earlier vintage rather than overwriting it.
 
-1. Add an ingestion interface and one official-source connector at a time (RBI then MoSPI).
-2. Store observations and immutable vintages in PostgreSQL; keep raw source files in object storage.
-3. Add a release calendar, observability and automated reconciliation against source totals.
-4. Obtain redistribution rights before offering exchange or commercial data.
+## Data and storage
+
+The database path defaults to `data/indian_macro_hub.db`. For backwards compatibility, an existing pre-rename `data/arthadata.db` is used automatically when the new file does not exist. Override the location with `INDIAN_MACRO_HUB_DATABASE`.
+
+The SQLite file is intentionally excluded from Git because databases may contain large, licensed, or environment-specific data. A fresh clone therefore starts with demo data unless a database volume or live connector is supplied.
+
+The `series` table stores definitions and provenance. The `observations` table stores values and immutable vintages with a unique `(series_id, observation_date, vintage_date)` key. See `app/store.py` for the storage contract.
+
+## Project structure
+
+```text
+app/main.py          FastAPI app and HTTP endpoints
+app/store.py         SQLite schema and query layer
+app/catalog.py       Demo catalog and seed observations
+app/world_bank.py    World Bank connector
+app/fred.py          FRED connector
+app/official_csv.py  Approved CSV importer
+app/static/          Browser UI
+tests/               Unit tests
+Dockerfile           Production container image
+```
+
+## Verification
+
+```bash
+python -m unittest discover -s tests -v
+python -m compileall -q app tests
+```
+
+## Production roadmap
+
+Before treating this as a public data service, add scheduled ingestion with retries and reconciliation, provider licence checks, structured logging and metrics, authentication/rate limiting for write operations, PostgreSQL plus object storage for raw releases, and a release calendar. Do not redistribute a provider's data until its terms allow it.
