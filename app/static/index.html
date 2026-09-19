@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Indian Macro Hub</title><link rel="stylesheet" href="/app/style.css"></head>
+  <body>
+    <header><a class="brand" href="/app/">indian<span>macro hub</span></a><nav><a href="/docs">API docs</a><a href="#about">Methodology</a></nav></header>
+    <main>
+      <section class="hero"><p class="eyebrow">INDIA'S ECONOMIC DATA, MADE USABLE</p><h1>Find the number.<br><em>Trust the definition.</em></h1><p class="intro">A clean, source-linked time-series catalog for India’s macroeconomy and financial system.</p><div class="search"><input id="search" placeholder="Search inflation, repo rate, bank credit…" autofocus><button id="searchButton">Search</button></div></section>
+      <aside class="notice" id="dataNotice" role="status"></aside>
+      <section class="catalog"><div class="section-heading"><div><p class="eyebrow">CATALOG</p><h2>Explore key series</h2></div><span id="count"></span></div><div id="series" class="cards" aria-live="polite"></div></section>
+      <section id="detail" class="detail hidden"><button id="back">← All series</button><div id="detailContent"></div></section>
+    </main>
+    <footer id="about">Indian Macro Hub MVP · Every production series should retain its original source, definition, methodology and revision history.</footer>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script><script src="/app/app.js"></script>
+  </body>
+</html>
